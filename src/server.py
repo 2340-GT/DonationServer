@@ -82,10 +82,14 @@ class ItemSchema(ma.ModelSchema):
         model = Item
 
 #RESOURCES
+
+#Class to get all users(GET method), add 1 user(POST method) and delete all users(DELETE)
+#end point /user
+
 class UsersResource(Resource):
     def get(self):
         result = UserSchema(many = True).dump(User.query.all())
-        return jsonify({"record": result.data, "status": 200})
+        return jsonify({"results": result.data, "status": 200})
     def post(self):
         raw_data = request.get_json()
         if not raw_data:
@@ -105,7 +109,7 @@ class UsersResource(Resource):
         db.session.add(new_user)
         db.session.commit()
         result = UserSchema().dump(User.query.get(new_user.id))
-        return jsonify({"record": result.data, "status": 200})
+        return jsonify({"results": result.data, "status": 200})
     def delete(self):
         try:
             result = db.session.query(User).delete()
@@ -114,6 +118,9 @@ class UsersResource(Resource):
         except:
             db.session.rollback()
             return jsonify({"message": "An error has occured, all changes have been reverted", "status": 400})
+
+#Class to get a specific user by username(GET), change lock status of one user(PUT) or delete a user(DELETE)
+#Endpoint /user/<username>
 
 class UserResource(Resource):
     def get(self, username):
@@ -142,6 +149,9 @@ class UserResource(Resource):
             db.session.rollback()
             return jsonify({"message": "An error has occured, all changes have been reverted", "status": 400})
 
+#Class used to log in
+#End point /user/<username>/<password>
+
 class UserLogInResource(Resource):
     def get(self, username, password):
         result = User.query.filter_by(username=username, password=password).first()
@@ -150,12 +160,15 @@ class UserLogInResource(Resource):
         result = UserSchema().dump(result)
         if result.data["status"] == 0:
             return jsonify({"message" : f"User {username} currently locked out", "status": 403})
-        return jsonify({"record": result.data, "status": 200})
+        return jsonify({"results": result.data, "status": 200})
+
+#Class used to get all items (GET), add an item(POST) or delete all items (DELETE)
+#Endpoint: /item
 
 class ItemsResource(Resource):
     def get(self):
         result = ItemSchema(many = True).dump(Item.query.all())
-        return jsonify({"record": result.data, "status": 200})
+        return jsonify({"results": result.data, "status": 200})
     def post(self):
         raw_data = request.get_json()
         if not raw_data:
@@ -173,7 +186,7 @@ class ItemsResource(Resource):
         db.session.add(new_item)
         db.session.commit()
         result = ItemSchema().dump(Item.query.get(new_item.id))
-        return jsonify({"record": result.data, "status": 200})
+        return jsonify({"results": result.data, "status": 200})
     def delete(self):
         try:
             result = db.session.query(Item).delete()
@@ -183,6 +196,9 @@ class ItemsResource(Resource):
             db.session.rollback()
             return jsonify({"message": "An error has occured, all changes have been reverted", "status": 400})
 
+#Class to search item by name (partial or fuzzy search allowed)
+#Endpoint: item/<name>
+
 class ItemResource(Resource):
     def get(self, name):
         choices = ItemSchema(many = True).dump(Item.query.with_entities(Item.description).all())
@@ -190,17 +206,31 @@ class ItemResource(Resource):
         results = process.extractBests(name, choices, score_cutoff=60)
         results = set(name for name, score in results)
         result = [ItemSchema(many=True).dump(Item.query.filter_by(description=name).all()).data for name in results]
-        return jsonify({"record": result, "status": 200})
+        return jsonify({"results": result, "status": 200})
+
+#Class to search item by location
+#Endpoint: item/<location_id>
+#Use location ID since location needs to be retrieved before this search can be used and enforce uniqueness
 
 class LocationItemResource(Resource):
     def get(self, location_id):
         result = ItemSchema(many=True).dump(Item.query.filter_by(location_id=location_id).all())
-        return jsonify({"record": result.data, "status": 200})
+        return jsonify({"results": result.data, "status": 200})
+
+#Class to search item by categories (support fuzzy/partial search since we don't have a category class)
+#Endpoint: item/<category>
 
 class CategoryItemResource(Resource):
     def get(self, category):
-        result = ItemSchema(many=True).dump(Item.query.filter_by(category=category).all())
-        return jsonify({"result": result.data, "status": 200})
+        choices = ItemSchema(many = True).dump(Item.query.with_entities(Item.category).all())
+        choices = [category["category"] for items in choices for category in items]
+        results = process.extractBests(category, choices, score_cutoff=60)
+        results = set(category for category, score in results)
+        result = [ItemSchema(many=True).dump(Item.query.filter_by(category=category).all()).data for category in results]
+        return jsonify({"results": result, "status": 200})
+
+#Class used to get a list of all locations (GET), add a location(POST) or delete all locations (DELETE)
+#Endpoint: /location
 
 class LocationsResource(Resource):
     def get(self):
@@ -230,7 +260,7 @@ class LocationsResource(Resource):
         db.session.add(new_location)
         db.session.commit()
         result = LocationSchema().dump(Location.query.get(new_location.id))
-        return jsonify({"record": result.data, "status": 200})
+        return jsonify({"results": result.data, "status": 200})
     def delete(self):
         try:
             result = db.session.query(Location).delete()
@@ -239,18 +269,6 @@ class LocationsResource(Resource):
         except:
             db.session.rollback()
             return jsonify({"message": "An error has occured, all changes have been reverted", "status": 400})
-
-class RecoverPasswordResource(Resource):
-    def sendMessage(service, email, message):
-        return
-    def get(username, email):
-        result = User.query.filter_by(username=username, email=email).first()
-        if result is None:
-            return jsonify({"message" : "Wrong validation information", "status": 400})
-        password = UserSchema().dump(result).password
-        sendMessage(service,email, f"Your password is {password}")
-        return
-
 
 #ENDPOINTS
 api.add_resource(UsersResource, '/user')
@@ -261,7 +279,6 @@ api.add_resource(ItemResource, '/item/name/<name>')
 api.add_resource(CategoryItemResource, '/item/category/<category>')
 api.add_resource(LocationItemResource, '/item/location/<location_id>')
 api.add_resource(LocationsResource, '/location')
-api.add_resource(RecoverPasswordResource, '/recover/<username>/<email>')
 
 
 if __name__ == '__main__':
