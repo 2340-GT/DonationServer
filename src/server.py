@@ -14,15 +14,19 @@ ma = Marshmallow(app)
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(300), nullable=False)
     password = db.Column(db.String(120), nullable=False)
     user_role = db.Column(db.Integer, nullable=False)
     location_id = db.Column(db.Integer)
+    status = db.Column(db.Integer)
 
-    def __init__(self, username, password, user_role, location_id=None):
+    def __init__(self, username, email, password, user_role, location_id=None):
         self.username = username
+        self.email = email
         self.password = password
         self.user_role = user_role
         self.location_id = location_id
+        self.status = 1
 
 class Location(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -88,15 +92,16 @@ class UsersResource(Resource):
             return jsonify({"message" : "Data inputted is not valid or does not exist", "status": 400})
         data, errors = UserSchema().load(raw_data)
         if errors:
-            return jsonify(errors)
+            return jsonify({"message" :errors, "status" : 400})
         username = data.username
+        email = data.email
         password = data.password
         user_role = data.user_role
         location_id = data.location_id
         user = User.query.filter_by(username=username).first()
         if user is not None:
             return jsonify({"message": "A user with this username has already existed, please try another", "status": 400})
-        new_user = User(username, password, user_role, location_id)
+        new_user = User(username, password, email, user_role, location_id)
         db.session.add(new_user)
         db.session.commit()
         result = UserSchema().dump(User.query.get(new_user.id))
@@ -111,11 +116,40 @@ class UsersResource(Resource):
             return jsonify({"message": "An error has occured, all changes have been reverted", "status": 400})
 
 class UserResource(Resource):
+    def get(self, username):
+        result = User.query.filter_by(username=username).first()
+        if result is None:
+            return jsonify({"message" : "No such user", "status": 400})
+        result = UserSchema().dump(result)
+        return jsonify({"record": result.data, "status": 200})
+    def put(self, username):
+        raw_data = request.get_json()
+        if not raw_data:
+            return jsonify({"message" : "Data inputted is not valid or does not exist", "status": 400})
+        data, errors = UserSchema().load(raw_data)
+        if errors:
+            return jsonify({"message" :errors, "status" : 400})
+        status = data.status
+    def delete(self, username):
+        try:
+            result = UserSchema.dump(User.query.filter_by(username=username))
+            if result is None:
+                return jsonify({"message" : "There is no such user", "status": 400})
+            db.session.delete(result)
+            db.session.commit()
+            return jsonify({"count": result, "status": 200})
+        except:
+            db.session.rollback()
+            return jsonify({"message": "An error has occured, all changes have been reverted", "status": 400})
+
+class UserLogInResource(Resource):
     def get(self, username, password):
         result = User.query.filter_by(username=username, password=password).first()
         if result is None:
             return jsonify({"message" : "Wrong validation information", "status": 400})
         result = UserSchema().dump(result)
+        if result.status = 0:
+            return jsonify({{"message" : "User currently locked out", "status": 403}})
         return jsonify({"record": result.data, "status": 200})
 
 class ItemsResource(Resource):
@@ -128,7 +162,7 @@ class ItemsResource(Resource):
             return jsonify({"message" : "Data inputted is not valid or does not exist", "status": 400})
         data, errors = ItemSchema().load(raw_data)
         if errors:
-            return jsonify(errors)
+            return jsonify({"message" :errors, "status" : 400})
         category = data.category
         description = data.description
         location_id = data.location_id
@@ -178,7 +212,7 @@ class LocationsResource(Resource):
             return jsonify({"message" : "Data inputted is not valid or does not exist", "status": 400})
         data, errors = LocationSchema().load(raw_data)
         if errors:
-            return jsonify(errors)
+            return jsonify({"message" :errors, "status" : 400})
         name = data.name
         latitude = data.latitude
         longitude = data.longitude
@@ -209,7 +243,8 @@ class LocationsResource(Resource):
 
 #ENDPOINTS
 api.add_resource(UsersResource, '/user')
-api.add_resource(UserResource,'/user/<username>/<password>')
+api.add_resource(UserResource, '/user/<username>')
+api.add_resource(UserLogInResource,'/user/<username>/<password>')
 api.add_resource(ItemsResource, '/item')
 api.add_resource(ItemResource, '/item/name/<name>')
 api.add_resource(CategoryItemResource, '/item/category/<category>')
