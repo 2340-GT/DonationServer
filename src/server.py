@@ -14,7 +14,7 @@ ma = Marshmallow(app)
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(300), nullable=False)
+    email = db.Column(db.String(300), unique=True, nullable=False)
     password = db.Column(db.String(120), nullable=False)
     user_role = db.Column(db.Integer, nullable=False)
     location_id = db.Column(db.Integer)
@@ -101,7 +101,7 @@ class UsersResource(Resource):
         user = User.query.filter_by(username=username).first()
         if user is not None:
             return jsonify({"message": "A user with this username has already existed, please try another", "status": 400})
-        new_user = User(username, password, email, user_role, location_id)
+        new_user = User(username, email, password, user_role, location_id)
         db.session.add(new_user)
         db.session.commit()
         result = UserSchema().dump(User.query.get(new_user.id))
@@ -126,10 +126,10 @@ class UserResource(Resource):
         raw_data = request.get_json()
         if not raw_data:
             return jsonify({"message" : "Data inputted is not valid or does not exist", "status": 400})
-        data, errors = UserSchema().load(raw_data)
-        if errors:
-            return jsonify({"message" :errors, "status" : 400})
-        status = data.status
+        User.query.filter_by(username=username).update(dict(status=raw_data["status"]))
+        db.session.commit()
+        return jsonify({"message": f"User {username} has been updated", "status": 200})
+
     def delete(self, username):
         try:
             result = UserSchema.dump(User.query.filter_by(username=username))
@@ -148,8 +148,8 @@ class UserLogInResource(Resource):
         if result is None:
             return jsonify({"message" : "Wrong validation information", "status": 400})
         result = UserSchema().dump(result)
-        if result.status = 0:
-            return jsonify({{"message" : "User currently locked out", "status": 403}})
+        if result.data["status"] == 0:
+            return jsonify({"message" : f"User {username} currently locked out", "status": 403})
         return jsonify({"record": result.data, "status": 200})
 
 class ItemsResource(Resource):
@@ -240,6 +240,17 @@ class LocationsResource(Resource):
             db.session.rollback()
             return jsonify({"message": "An error has occured, all changes have been reverted", "status": 400})
 
+class RecoverPasswordResource(Resource):
+    def sendMessage(service, email, message):
+        return
+    def get(username, email):
+        result = User.query.filter_by(username=username, email=email).first()
+        if result is None:
+            return jsonify({"message" : "Wrong validation information", "status": 400})
+        password = UserSchema().dump(result).password
+        sendMessage(service,email, f"Your password is {password}")
+        return
+
 
 #ENDPOINTS
 api.add_resource(UsersResource, '/user')
@@ -250,6 +261,7 @@ api.add_resource(ItemResource, '/item/name/<name>')
 api.add_resource(CategoryItemResource, '/item/category/<category>')
 api.add_resource(LocationItemResource, '/item/location/<location_id>')
 api.add_resource(LocationsResource, '/location')
+api.add_resource(RecoverPasswordResource, '/recover/<username>/<email>')
 
 
 if __name__ == '__main__':
